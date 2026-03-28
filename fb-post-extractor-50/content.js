@@ -2,6 +2,18 @@
   if (window.__FB_POST_EXTRACTOR_LOADED__) return;
   window.__FB_POST_EXTRACTOR_LOADED__ = true;
 
+  /*
+   * File: /workspace/brave-fb-onlyme-extension/fb-post-extractor-50/content.js
+   * Author: Bruno DELNOZ
+   * Email: bruno.delnoz@protonmail.com
+   * Purpose: Extract structured data from Facebook posts without looping indefinitely.
+   * Version: v1.1.0
+   * Date: 2026-03-28 00:00 UTC
+   * Changelog:
+   * - v1.0.0 (2026-03-28 00:00 UTC): Initial extractor logic.
+   * - v1.1.0 (2026-03-28 00:00 UTC): Stop extraction early when no new posts are collected across consecutive scrolls.
+   */
+
   const state = {
     running: false,
     done: false,
@@ -12,7 +24,9 @@
     lastMessage: "",
     posts: [],
     seenKeys: new Set(),
-    skippedLowQuality: 0
+    skippedLowQuality: 0,
+    stagnantScrolls: 0,
+    maxStagnantScrolls: 12
   };
 
   const POST_URL_HINTS = ["/posts/", "story_fbid=", "/permalink/", "/photo/", "/videos/"];
@@ -294,11 +308,13 @@
     state.seenKeys = new Set();
     state.attemptedScrolls = 0;
     state.skippedLowQuality = 0;
+    state.stagnantScrolls = 0;
 
     renderOverlay();
     log("Starting extraction...");
 
     while (state.posts.length < state.maxPosts && state.attemptedScrolls < state.maxScrolls) {
+      const postCountBeforeScan = state.posts.length;
       const articles = getArticles();
 
       for (const article of articles) {
@@ -324,7 +340,21 @@
         log(`Collected ${state.posts.length}/${state.maxPosts} (skipped ${state.skippedLowQuality})`);
       }
 
+      if (state.posts.length > postCountBeforeScan) {
+        state.stagnantScrolls = 0;
+      } else {
+        state.stagnantScrolls += 1;
+        log(
+          `No new post found on this pass (${state.stagnantScrolls}/${state.maxStagnantScrolls}).`
+        );
+      }
+
       if (state.posts.length >= state.maxPosts) {
+        break;
+      }
+
+      if (state.stagnantScrolls >= state.maxStagnantScrolls) {
+        log("Stopping early to avoid loop: no new posts detected for too many scrolls.");
         break;
       }
 
@@ -376,6 +406,8 @@
       maxScrolls: state.maxScrolls,
       count: state.posts.length,
       skippedLowQuality: state.skippedLowQuality,
+      stagnantScrolls: state.stagnantScrolls,
+      maxStagnantScrolls: state.maxStagnantScrolls,
       lastMessage: state.lastMessage
     };
   }

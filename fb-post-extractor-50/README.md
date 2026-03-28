@@ -1,3 +1,10 @@
+<!--
+Document : fb-post-extractor-50/README.md
+Auteur : Bruno DELNOZ
+Email : bruno.delnoz@protonmail.com
+Version : v1.1.0
+Date : 2026-03-28 00:00
+-->
 # Facebook Post Extractor (50)
 
 This is a second extension that extracts structured data from up to **50 Facebook posts**.
@@ -43,3 +50,4 @@ You can use the exported JSON to:
 
 - Extraction depends on Facebook DOM structure and can require selector adjustments over time.
 - The extension intentionally caps collection to 50 posts.
+- The extractor now stops early when several consecutive scrolls find no new post, which prevents long loop-like runs.
