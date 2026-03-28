@@ -2,7 +2,7 @@
 Document : fb-post-extractor-50/INSTALL.md
 Auteur : Bruno DELNOZ
 Email : bruno.delnoz@protonmail.com
-Version : v1.1.0
+Version : v1.2.0
 Date : 2026-03-28 00:00
 -->
 # Installation Guide

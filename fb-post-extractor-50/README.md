@@ -2,7 +2,7 @@
 Document : fb-post-extractor-50/README.md
 Auteur : Bruno DELNOZ
 Email : bruno.delnoz@protonmail.com
-Version : v1.1.0
+Version : v1.2.0
 Date : 2026-03-28 00:00
 -->
 # Facebook Post Extractor (50)
@@ -51,3 +51,4 @@ You can use the exported JSON to:
 - Extraction depends on Facebook DOM structure and can require selector adjustments over time.
 - The extension intentionally caps collection to 50 posts.
 - The extractor now stops early when several consecutive scrolls find no new post, which prevents long loop-like runs.
+- The extractor now rejects comment-level entries and keeps only records with a detected post permalink.

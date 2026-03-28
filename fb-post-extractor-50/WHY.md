@@ -2,7 +2,7 @@
 Document : fb-post-extractor-50/WHY.md
 Auteur : Bruno DELNOZ
 Email : bruno.delnoz@protonmail.com
-Version : v1.1.0
+Version : v1.2.0
 Date : 2026-03-28 00:00
 -->
 # Why this extractor exists
@@ -19,3 +19,8 @@ This companion extension provides a structured export of Facebook post data so b
 
 On some timelines, Facebook can keep loading the same visible article set while no additional valid post is discovered.  
 The anti-loop safeguard introduced in v1.1.0 stops extraction after repeated stagnant passes, reducing unnecessary scrolling time and making completion more predictable.
+
+## Why v1.2.0 tightened filtering
+
+Some extracted records were actually comment-level entries (for example URLs containing `comment_id=`).  
+v1.2.0 now requires a post permalink and excludes comment links in author detection, so exported rows represent real posts instead of comments.

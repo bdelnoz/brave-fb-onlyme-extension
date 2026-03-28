@@ -2,10 +2,16 @@
 Document : fb-post-extractor-50/CHANGELOG.md
 Auteur : Bruno DELNOZ
 Email : bruno.delnoz@protonmail.com
-Version : v1.1.0
+Version : v1.2.0
 Date : 2026-03-28 00:00
 -->
 # Changelog
+
+## v1.2.0 - 2026-03-28 00:00 UTC - Bruno DELNOZ
+
+- Added strict filtering to keep only post-level entries with a detected permalink.
+- Ignored author links containing `comment_id=` or `/comment/` so comment threads are no longer extracted as posts.
+- Kept anti-loop behavior from v1.1.0 while improving extraction quality on profile timelines.
 
 ## v1.1.0 - 2026-03-28 00:00 UTC - Bruno DELNOZ
 

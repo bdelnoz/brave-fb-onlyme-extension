@@ -7,11 +7,12 @@
    * Author: Bruno DELNOZ
    * Email: bruno.delnoz@protonmail.com
    * Purpose: Extract structured data from Facebook posts without looping indefinitely.
-   * Version: v1.1.0
+   * Version: v1.2.0
    * Date: 2026-03-28 00:00 UTC
    * Changelog:
    * - v1.0.0 (2026-03-28 00:00 UTC): Initial extractor logic.
    * - v1.1.0 (2026-03-28 00:00 UTC): Stop extraction early when no new posts are collected across consecutive scrolls.
+   * - v1.2.0 (2026-03-28 00:00 UTC): Reject comment-level entries by requiring a post permalink and filtering comment URLs in author detection.
    */
 
   const state = {
@@ -64,6 +65,14 @@
     });
   }
 
+  function getCommentLinks(article) {
+    const links = Array.from(article.querySelectorAll('a[href]')).filter(isVisible);
+    return links.filter((a) => {
+      const href = a.href || "";
+      return href.includes("comment_id=") || href.includes("/comment/");
+    });
+  }
+
   function isArticleReady(article) {
     const loading = article.querySelector('[role="status"], [data-visualcompletion="loading-state"]');
     if (loading && isVisible(loading)) return false;
@@ -112,7 +121,15 @@
   function getArticles() {
     return Array.from(document.querySelectorAll('[role="article"]'))
       .filter(isVisible)
-      .filter(isArticleReady);
+      .filter(isArticleReady)
+      .filter((article) => {
+        const postLinks = getPostLinks(article);
+        const commentLinks = getCommentLinks(article);
+
+        if (postLinks.length === 0) return false;
+        if (commentLinks.length > 0 && postLinks.length === 0) return false;
+        return true;
+      });
   }
 
   function pickPermalink(article) {
@@ -146,6 +163,7 @@
       const low = normLower(text);
 
       if (!href.includes("facebook.com")) continue;
+      if (href.includes("comment_id=") || href.includes("/comment/")) continue;
       if (!text || text.length < 2 || text.length > 80) continue;
       if (looksLikePostUrl(href)) continue;
       if (["like", "j'aime", "comment", "commenter", "share", "partager", "see more", "voir plus"].some((token) => low.includes(token))) continue;
@@ -265,6 +283,8 @@
   function isLowQuality(post) {
     let score = 0;
 
+    if (!post.permalink) return true;
+
     if (post.permalink) score += 2;
     if (post.authorName && post.authorName !== "unknown") score += 1;
     if (post.timestampIso || post.timestampLabel) score += 1;
@@ -322,6 +342,11 @@
 
         const post = extractArticle(article);
         if (!post.postKey) {
+          state.skippedLowQuality += 1;
+          continue;
+        }
+
+        if (!post.permalink) {
           state.skippedLowQuality += 1;
           continue;
         }
