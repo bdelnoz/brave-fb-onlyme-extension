@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Only Me Bulk",
+  "version": "1.1.0",
+  "description": "Passe les posts Facebook en 'Only me' en boucle.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://m.facebook.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>FB Only Me Bulk</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      width: 340px;
+      margin: 12px;
+    }
+
+    h1 {
+      font-size: 16px;
+      margin: 0 0 12px 0;
+    }
+
+    label {
+      display: block;
+      margin: 8px 0 4px;
+      font-size: 13px;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px;
+    }
+
+    button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+
+    #status {
+      margin-top: 10px;
+      white-space: pre-wrap;
+      font-size: 12px;
+      border: 1px solid #ccc;
+      padding: 8px;
+      min-height: 120px;
+      background: #f7f7f7;
+    }
+
+    .small {
+      font-size: 11px;
+      color: #555;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Facebook → Only Me</h1>
+
+  <label for="maxPosts">Nombre max de posts à traiter</label>
+  <input id="maxPosts" type="number" value="10" min="1" max="10000">
+
+  <label for="actionDelayMs">Pause moyenne entre actions (ms)</label>
+  <input id="actionDelayMs" type="number" value="1800" min="300" max="30000">
+
+  <label for="scrollDelayMs">Pause après scroll (ms)</label>
+  <input id="scrollDelayMs" type="number" value="2200" min="300" max="30000">
+
+  <button id="startBtn">Lancer</button>
+  <button id="stopBtn">Stop</button>
+  <button id="refreshBtn">Rafraîchir statut</button>
+
+  <div id="status">Prêt.</div>
+
+  <div class="small">
+    Ouvre ton profil Facebook dans l’onglet actif avant de lancer.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
