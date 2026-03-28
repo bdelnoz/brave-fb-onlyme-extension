@@ -530,6 +530,10 @@ ${state.lastMessage || ""}`;
   }
 
   async function processArticle(article) {
+    // FIX: use a DOM attribute to mark processed articles — never rely on random keys
+    if (article.dataset.fbomDone) return false;
+    article.dataset.fbomDone = "1";
+
     // Scroll into view and wait for lazy-loaded content to appear
     const ready = await waitForArticleReady(article);
     if (!ready) {
@@ -537,10 +541,11 @@ ${state.lastMessage || ""}`;
       return false;
     }
 
+    // Also dedupe by URL key when available (belt & suspenders)
     const key = getPostKey(article);
     if (state.processedKeys.has(key)) return false;
-
     state.processedKeys.add(key);
+
     state.attempted++;
     updateOverlay();
     log("process post", key.slice(0, 180));
@@ -626,6 +631,8 @@ ${state.lastMessage || ""}`;
     state.skippedAlreadyOnlyMe = 0;
     state.lastMessage = "";
     state.config = { ...state.config, ...config };
+    // Clear DOM markers so articles can be re-processed on a fresh run
+    document.querySelectorAll('[data-fbom-done]').forEach(el => delete el.dataset.fbomDone);
     updateOverlay();
   }
 
