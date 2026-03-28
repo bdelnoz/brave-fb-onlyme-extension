@@ -88,43 +88,101 @@
     return hasButtons || hasLinks || hasText;
   }
 
-  // Returns true if this article is a real post (not a comment/reply thread)
+  // Exclude comment/reply threads — don't require a specific post URL pattern
   function isRealPost(article) {
     const links = Array.from(article.querySelectorAll('a[href]'));
-    let hasPostLink = false;
     for (const a of links) {
       const href = a.href || "";
-      // Reject comment threads
+      // If any link in the article is a comment anchor, it's a comment thread
       if (href.includes("comment_id=") || href.includes("/comment/")) return false;
-      if (
-        href.includes("/posts/") ||
-        href.includes("story_fbid=") ||
-        href.includes("/permalink/") ||
-        href.includes("/photo/") ||
-        href.includes("/videos/")
-      ) hasPostLink = true;
     }
-    return hasPostLink;
+    // Also reject articles that are clearly nested inside another article (reply threads)
+    let parent = article.parentElement;
+    while (parent) {
+      if (parent !== article && parent.getAttribute("role") === "article") return false;
+      parent = parent.parentElement;
+    }
+    return true;
+  }
+
+  // Find the closest post-level container wrapping a given element
+  function getPostContainer(el) {
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      // Stop at role=article if found
+      if (node.getAttribute("role") === "article") return node;
+      // Stop at a div that is "wide enough" to be a post card and contains the el
+      const r = node.getBoundingClientRect();
+      if (r.width > 300 && r.height > 80) {
+        // Check it has a timestamp link (strong signal it's a post)
+        const hasTimestamp = Array.from(node.querySelectorAll('a[href]')).some(a => {
+          const href = a.href || "";
+          return href.includes("/posts/") || href.includes("story_fbid=") ||
+                 href.includes("/permalink/") || href.includes("/photo/") ||
+                 href.includes("/videos/");
+        });
+        if (hasTimestamp) return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
   }
 
   function getArticles() {
-    return Array.from(document.querySelectorAll('[role="article"]'))
-      .filter(isVisible)
-      .filter(isArticleReady)
-      .filter(isRealPost);
+    const seen = new WeakSet();
+    const results = [];
+
+    // Strategy 1: classic role=article (works on news feed)
+    for (const el of document.querySelectorAll('[role="article"]')) {
+      if (isVisible(el) && isRealPost(el) && !seen.has(el)) {
+        seen.add(el);
+        results.push(el);
+      }
+    }
+
+    // Strategy 2: find post containers by their "···" menu button
+    // This catches profile posts that aren't wrapped in role=article
+    const menuButtons = Array.from(document.querySelectorAll('[aria-label]')).filter(el => {
+      if (!isVisible(el) || !isInViewport(el)) return false;
+      const aria = norm(el.getAttribute("aria-label") || "");
+      return (
+        aria.includes("actions for this post") ||
+        aria.includes("more options") ||
+        aria.includes("post options") ||
+        aria.includes("options for this post") ||
+        // French
+        aria.includes("actions pour cette publication") ||
+        aria.includes("plus d'options")
+      );
+    });
+
+    for (const btn of menuButtons) {
+      const container = getPostContainer(btn);
+      if (container && !seen.has(container) && isRealPost(container)) {
+        seen.add(container);
+        results.push(container);
+      }
+    }
+
+    // Sort top-to-bottom so we process in reading order
+    results.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+
+    log(`getArticles: ${results.length} (${results.filter(el => el.getAttribute("role") === "article").length} role=article + ${results.filter(el => el.getAttribute("role") !== "article").length} by menu btn)`);
+    return results;
   }
 
   // Scroll to article and wait up to `maxMs` for it to finish loading
-  async function waitForArticleReady(article, maxMs = 5000) {
+  async function waitForArticleReady(article, maxMs = 8000) {
     article.scrollIntoView({ block: "center", behavior: "smooth" });
-    await sleep(600);
+    await sleep(1000); // give Facebook time to start rendering
 
     const deadline = Date.now() + maxMs;
     while (Date.now() < deadline) {
       if (isArticleReady(article)) return true;
       log("waiting for article to load...");
-      await sleep(400);
+      await sleep(500);
     }
+    log("article timeout — Facebook didn't load it");
     return false;
   }
 
@@ -580,6 +638,9 @@ ${state.lastMessage || ""}`;
     updateOverlay();
     log("start");
 
+    let emptyScrolls = 0;
+    const MAX_EMPTY_SCROLLS = 20;
+
     while (state.running && !state.stopRequested) {
       if (state.attempted >= state.config.maxPosts) {
         log("stop maxPosts");
@@ -588,6 +649,19 @@ ${state.lastMessage || ""}`;
 
       const articles = getArticles();
       log("visible articles =", articles.length);
+
+      if (articles.length === 0) {
+        emptyScrolls++;
+        log(`no articles (${emptyScrolls}/${MAX_EMPTY_SCROLLS} empty scrolls)`);
+        if (emptyScrolls >= MAX_EMPTY_SCROLLS) {
+          log("stop: trop de scrolls sans articles — es-tu sur ton profil Facebook ?");
+          break;
+        }
+        await scrollMore();
+        continue;
+      }
+
+      emptyScrolls = 0; // reset on success
 
       for (const article of articles) {
         if (!state.running || state.stopRequested) break;
