@@ -7,13 +7,14 @@
    * Author: Bruno DELNOZ
    * Email: bruno.delnoz@protonmail.com
    * Purpose: Bulk update Facebook post audience to "Only Me" using safer post-level targeting.
-   * Version: v1.3.0
-   * Date: 2026-03-28 00:00 UTC
+   * Version: v1.4.0
+   * Date: 2026-03-28 10:45 UTC
    * Changelog:
    * - v1.0.0 (2026-03-28 00:00 UTC): Initial automation flow.
    * - v1.1.0 (2026-03-28 00:00 UTC): Robust menu/dialog handling and retries.
    * - v1.2.0 (2026-03-28 00:00 UTC): Improved readiness checks and processing guards.
    * - v1.3.0 (2026-03-28 00:00 UTC): Enforce post-permalink detection to avoid comment/reply containers.
+   * - v1.4.0 (2026-03-28 10:45 UTC): Harden audience replacement to target only the real privacy selector.
    */
 
   const POST_URL_HINTS = ["/posts/", "story_fbid=", "/permalink/", "/photo/", "/videos/", "/reel/"];
@@ -309,7 +310,10 @@ ${state.lastMessage || ""}`;
           aria.includes("actions for this post") ||
           aria.includes("more options") ||
           aria.includes("post options") ||
-          aria.includes("options for this post")
+          aria.includes("options for this post") ||
+          // French
+          aria.includes("actions pour cette publication") ||
+          aria.includes("plus d'options")
         );
       });
 
@@ -534,13 +538,49 @@ ${state.lastMessage || ""}`;
 
     log("audience option candidates =", allCandidates.length);
 
-    const onlyMeEl = allCandidates.find(el => {
+    const onlyMeCandidates = allCandidates.filter(el => {
       const txt = norm(el.innerText || el.textContent || "");
       const aria = norm(el.getAttribute("aria-label") || "");
-      return txt.includes("only me") || aria.includes("only me") ||
+      const combo = `${txt} ${aria}`;
+      return combo.includes("only me") ||
              // French
-             txt.includes("moi uniquement") || aria.includes("moi uniquement");
+             combo.includes("moi uniquement");
     });
+
+    // Filter out unrelated "Only me" contexts (saved collections/bookmarks etc.)
+    const sanitizedOnlyMeCandidates = onlyMeCandidates.filter((el) => {
+      const candidateText = norm(el.innerText || el.textContent || "");
+      const parentText = norm((el.parentElement?.innerText || "") + " " + (el.closest('[role="dialog"]')?.innerText || ""));
+      const blacklist = [
+        "save to",
+        "saved",
+        "collection",
+        "save list",
+        "bookmark",
+        "enregistré",
+        "enregistrer dans",
+        "liste",
+        "favoris"
+      ];
+      if (candidateText.includes("save") || candidateText.includes("collection")) return false;
+      return !blacklist.some((word) => parentText.includes(word));
+    });
+
+    const scoreOnlyMeCandidate = (el) => {
+      const txt = norm(el.innerText || el.textContent || "");
+      const aria = norm(el.getAttribute("aria-label") || "");
+      const role = norm(el.getAttribute("role") || "");
+      const combo = `${txt} ${aria}`;
+      let score = 0;
+      if (combo === "only me" || combo === "moi uniquement") score += 100;
+      if (combo.includes("only me") || combo.includes("moi uniquement")) score += 30;
+      if (role === "radio" || role === "option") score += 20;
+      if (combo.includes("who can see") || combo.includes("qui peut voir")) score += 10;
+      return score;
+    };
+
+    sanitizedOnlyMeCandidates.sort((a, b) => scoreOnlyMeCandidate(b) - scoreOnlyMeCandidate(a));
+    const onlyMeEl = sanitizedOnlyMeCandidates[0] || null;
 
     if (!onlyMeEl) {
       state.failedOnlyMe++;
@@ -583,6 +623,15 @@ ${state.lastMessage || ""}`;
     log("click done", describeEl(done));
     realClick(done);
     await sleep(jitter(1400));
+
+    // Basic post-click verification: dialog should usually close.
+    const dialogStillThere = isVisible(dialog);
+    if (dialogStillThere) {
+      state.failedDone++;
+      log("done clicked but dialog is still visible");
+      return false;
+    }
+
     return true;
   }
 

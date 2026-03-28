@@ -2,8 +2,8 @@
 Document : INSTALL.md
 Auteur : Bruno DELNOZ
 Email : bruno.delnoz@protonmail.com
-Version : v1.3.0
-Date : 2026-03-28 00:00
+Version : v1.4.0
+Date : 2026-03-28 10:45
 -->
 # Installation
 
