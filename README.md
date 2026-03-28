@@ -12,3 +12,18 @@ Cette extension automatise le passage en masse de la confidentialité de vos pub
 3. Cliquez sur **Charger l’extension non empaquetée**.
 4. Sélectionnez ce dossier.
 5. Ouvrez Facebook puis lancez l’extension depuis la popup.
+
+## Deuxième extension: extracteur de 50 posts
+
+Un second module est disponible dans `fb-post-extractor-50/`.
+
+Objectif:
+- extraire jusqu'à 50 posts Facebook,
+- produire un JSON structuré (auteur, audience, contenu, engagement, etc.),
+- utiliser ces données pour ajuster/valider l’extension "Only Me" principale.
+
+Chargement:
+1. Ouvrir `brave://extensions`
+2. Mode développeur
+3. Charger l’extension non empaquetée
+4. Sélectionner le dossier `fb-post-extractor-50`
