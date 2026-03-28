@@ -70,8 +70,42 @@
     return true;
   }
 
+  // An article is "ready" when it has actual loaded content:
+  // - has interactive buttons, OR
+  // - has links (post timestamp/permalink), OR
+  // - has non-trivial text
+  // Excludes skeleton/loading placeholders
+  function isArticleReady(article) {
+    // If it still has a loading spinner, skip
+    const loading = article.querySelector('[role="status"], [data-visualcompletion="loading-state"]');
+    if (loading && isVisible(loading)) return false;
+
+    // Must have at least one button or link, or meaningful text
+    const hasButtons = article.querySelector('[role="button"], button') !== null;
+    const hasLinks   = article.querySelector('a[href]') !== null;
+    const hasText    = norm(article.innerText || "").length > 10;
+
+    return hasButtons || hasLinks || hasText;
+  }
+
   function getArticles() {
-    return Array.from(document.querySelectorAll('[role="article"]')).filter(isVisible);
+    return Array.from(document.querySelectorAll('[role="article"]'))
+      .filter(isVisible)
+      .filter(isArticleReady);
+  }
+
+  // Scroll to article and wait up to `maxMs` for it to finish loading
+  async function waitForArticleReady(article, maxMs = 5000) {
+    article.scrollIntoView({ block: "center", behavior: "smooth" });
+    await sleep(600);
+
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      if (isArticleReady(article)) return true;
+      log("waiting for article to load...");
+      await sleep(400);
+    }
+    return false;
   }
 
   function getPostKey(article) {
@@ -496,6 +530,13 @@ ${state.lastMessage || ""}`;
   }
 
   async function processArticle(article) {
+    // Scroll into view and wait for lazy-loaded content to appear
+    const ready = await waitForArticleReady(article);
+    if (!ready) {
+      log("article not ready after timeout, skip");
+      return false;
+    }
+
     const key = getPostKey(article);
     if (state.processedKeys.has(key)) return false;
 
