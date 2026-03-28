@@ -1,0 +1,32 @@
+<!--
+Document : fb-post-extractor-50/WHY.md
+Auteur : Bruno DELNOZ
+Email : bruno.delnoz@protonmail.com
+Version : v1.3.0
+Date : 2026-03-28 09:45
+-->
+# Why this extractor exists
+
+This companion extension provides a structured export of Facebook post data so bulk privacy workflows can be measured and validated.
+
+## Main goals
+
+- Build a reliable JSON snapshot of recent posts.
+- Help identify existing post audiences before bulk changes.
+- Provide a practical feedback loop for selector and automation tuning.
+
+## Why v1.1.0 changed the run loop
+
+On some timelines, Facebook can keep loading the same visible article set while no additional valid post is discovered.  
+The anti-loop safeguard introduced in v1.1.0 stops extraction after repeated stagnant passes, reducing unnecessary scrolling time and making completion more predictable.
+
+## Why v1.2.0 tightened filtering
+
+Some extracted records were actually comment-level entries (for example URLs containing `comment_id=`).  
+v1.2.0 now requires a post permalink and excludes comment links in author detection, so exported rows represent real posts instead of comments.
+
+## Why v1.3.0 opens audience settings
+
+The extractor is meant to prepare the final bulk privacy automation.  
+To do that reliably, v1.3.0 inspects the real **Change/Edit audience** dialog for each post and records concrete DOM metadata (labels, roles, checked markers, and candidate controls).  
+This gives actionable information to wire the main "Only Me" extension with the right selectors and parameters.

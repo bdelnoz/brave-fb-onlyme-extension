@@ -15,6 +15,9 @@ function renderState(state) {
     `done=${state.done}\n` +
     `count=${state.count}/${state.maxPosts}\n` +
     `attemptedScrolls=${state.attemptedScrolls}/${state.maxScrolls}\n` +
+    `stagnantScrolls=${state.stagnantScrolls || 0}/${state.maxStagnantScrolls || 0}\n` +
+    `menuInspections=${state.menuInspectionsSucceeded || 0}/${state.menuInspectionsAttempted || 0}\n` +
+    `menuInspectionFailures=${state.menuInspectionsFailed || 0}\n` +
     `scrollDelayMs=${state.scrollDelayMs}\n` +
     `skippedLowQuality=${state.skippedLowQuality || 0}\n` +
     `lastMessage=${state.lastMessage || ""}`

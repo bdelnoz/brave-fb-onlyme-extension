@@ -2,6 +2,20 @@
   if (window.__FB_POST_EXTRACTOR_LOADED__) return;
   window.__FB_POST_EXTRACTOR_LOADED__ = true;
 
+  /*
+   * File: /workspace/brave-fb-onlyme-extension/fb-post-extractor-50/content.js
+   * Author: Bruno DELNOZ
+   * Email: bruno.delnoz@protonmail.com
+   * Purpose: Extract structured data from Facebook posts and inspect audience dialog selectors.
+   * Version: v1.3.0
+   * Date: 2026-03-28 09:45 UTC
+   * Changelog:
+   * - v1.0.0 (2026-03-28 00:00 UTC): Initial extractor logic.
+   * - v1.1.0 (2026-03-28 00:00 UTC): Stop extraction early when no new posts are collected across consecutive scrolls.
+   * - v1.2.0 (2026-03-28 00:00 UTC): Reject comment-level entries by requiring a post permalink and filtering comment URLs in author detection.
+   * - v1.3.0 (2026-03-28 09:45 UTC): Open post menu, navigate to Change/Edit audience, and extract dialog-level selectors/labels for automation mapping.
+   */
+
   const state = {
     running: false,
     done: false,
@@ -12,7 +26,12 @@
     lastMessage: "",
     posts: [],
     seenKeys: new Set(),
-    skippedLowQuality: 0
+    skippedLowQuality: 0,
+    stagnantScrolls: 0,
+    maxStagnantScrolls: 12,
+    menuInspectionsAttempted: 0,
+    menuInspectionsSucceeded: 0,
+    menuInspectionsFailed: 0
   };
 
   const POST_URL_HINTS = ["/posts/", "story_fbid=", "/permalink/", "/photo/", "/videos/"];
@@ -50,6 +69,14 @@
     });
   }
 
+  function getCommentLinks(article) {
+    const links = Array.from(article.querySelectorAll('a[href]')).filter(isVisible);
+    return links.filter((a) => {
+      const href = a.href || "";
+      return href.includes("comment_id=") || href.includes("/comment/");
+    });
+  }
+
   function isArticleReady(article) {
     const loading = article.querySelector('[role="status"], [data-visualcompletion="loading-state"]');
     if (loading && isVisible(loading)) return false;
@@ -63,6 +90,212 @@
     state.lastMessage = message;
     console.log("FB-EXTRACTOR:", message);
     renderOverlay();
+  }
+
+  function jitter(ms) {
+    const delta = Math.round(ms * 0.2);
+    const min = Math.max(60, ms - delta);
+    const max = ms + delta;
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function realClick(el) {
+    if (!el) return false;
+    try {
+      el.scrollIntoView({ block: "center", behavior: "instant" });
+    } catch (e) {
+      // no-op: some elements may not support scrollIntoView in transient states
+    }
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    el.click();
+    return true;
+  }
+
+  function looksLikeAudienceActionText(value) {
+    const low = normLower(value);
+    if (!low) return false;
+    return [
+      "change audience",
+      "edit audience",
+      "modifier l’audience",
+      "modifier l'audience",
+      "changer l’audience",
+      "changer l'audience",
+      "audience"
+    ].some((token) => low.includes(token));
+  }
+
+  function looksLikePostMenuAria(value) {
+    const low = normLower(value);
+    if (!low) return false;
+    return [
+      "actions for this post",
+      "options for this post",
+      "more options",
+      "post options",
+      "actions pour cette publication",
+      "options de publication",
+      "plus d’options",
+      "plus d'options"
+    ].some((token) => low.includes(token));
+  }
+
+  async function waitForDialog(maxMs = 4500) {
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      const dialog = document.querySelector('[role="dialog"]');
+      if (dialog && isVisible(dialog)) return dialog;
+      await sleep(120);
+    }
+    return null;
+  }
+
+  async function waitForMenu(maxMs = 3000) {
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      const menu = document.querySelector('[role="menu"], [role="listbox"]');
+      if (menu && isVisible(menu)) return menu;
+      await sleep(100);
+    }
+    return null;
+  }
+
+  function describeElement(el) {
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      tag: (el.tagName || "").toLowerCase(),
+      role: el.getAttribute("role") || "",
+      ariaLabel: norm(el.getAttribute("aria-label") || ""),
+      ariaChecked: el.getAttribute("aria-checked"),
+      ariaPressed: el.getAttribute("aria-pressed"),
+      title: norm(el.getAttribute("title") || ""),
+      text: norm(el.innerText || el.textContent || ""),
+      className: norm((el.className || "").toString()).slice(0, 240),
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+  }
+
+  function extractAudienceDialogData(dialog) {
+    const audienceItems = Array.from(
+      dialog.querySelectorAll('[role="radio"], [role="menuitemradio"], [role="option"], [aria-checked], label, [role="button"]')
+    )
+      .filter(isVisible)
+      .map((el) => describeElement(el))
+      .filter((entry) => {
+        const text = normLower(entry?.text || "");
+        const aria = normLower(entry?.ariaLabel || "");
+        return [
+          "public",
+          "friends",
+          "only me",
+          "specific friends",
+          "custom",
+          "amis",
+          "moi uniquement",
+          "personnalis"
+        ].some((token) => text.includes(token) || aria.includes(token));
+      });
+
+    const selectedCandidate = audienceItems.find((entry) => entry?.ariaChecked === "true" || entry?.ariaPressed === "true") || null;
+    return {
+      dialogMeta: describeElement(dialog),
+      heading: norm(
+        dialog.querySelector('h1, h2, h3, [role="heading"]')?.textContent || ""
+      ),
+      audienceItems,
+      selectedCandidate
+    };
+  }
+
+  function closeDialogOrMenu() {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true })
+    );
+    document.dispatchEvent(
+      new KeyboardEvent("keyup", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true })
+    );
+  }
+
+  function findPostMenuButton(article) {
+    const candidates = Array.from(
+      article.querySelectorAll('[aria-label], [role="button"], button, div[tabindex="0"], span[role="button"]')
+    ).filter(isVisible);
+
+    const direct = candidates.find((el) => looksLikePostMenuAria(el.getAttribute("aria-label") || ""));
+    if (direct) return direct;
+
+    const fallback = candidates.find((el) => {
+      const txt = norm(el.innerText || el.textContent || "");
+      return txt === "…" || txt === "...";
+    });
+
+    return fallback || null;
+  }
+
+  function findAudienceActionNode(root) {
+    const candidates = Array.from(root.querySelectorAll('[role="menuitem"], [role="button"], button, span, div, a'))
+      .filter(isVisible);
+    return candidates.find((el) => {
+      const txt = norm(el.innerText || el.textContent || "");
+      const aria = norm(el.getAttribute("aria-label") || "");
+      return looksLikeAudienceActionText(txt) || looksLikeAudienceActionText(aria);
+    }) || null;
+  }
+
+  async function inspectAudienceDialog(article) {
+    const result = {
+      openedMenu: false,
+      clickedAudienceAction: false,
+      audienceDialogFound: false,
+      audienceDialog: null,
+      error: ""
+    };
+
+    const menuButton = findPostMenuButton(article);
+    if (!menuButton) {
+      result.error = "post_menu_not_found";
+      return result;
+    }
+
+    realClick(menuButton);
+    result.openedMenu = true;
+    await sleep(jitter(360));
+
+    const menuRoot = (await waitForMenu(3200)) || document;
+    const audienceAction = findAudienceActionNode(menuRoot);
+    if (!audienceAction) {
+      result.error = "change_audience_action_not_found";
+      closeDialogOrMenu();
+      await sleep(120);
+      return result;
+    }
+
+    realClick(audienceAction);
+    result.clickedAudienceAction = true;
+    await sleep(jitter(420));
+
+    const dialog = await waitForDialog(5200);
+    if (!dialog) {
+      result.error = "audience_dialog_not_found";
+      closeDialogOrMenu();
+      await sleep(120);
+      return result;
+    }
+
+    result.audienceDialogFound = true;
+    result.audienceDialog = extractAudienceDialogData(dialog);
+    closeDialogOrMenu();
+    await sleep(120);
+    closeDialogOrMenu();
+    await sleep(120);
+    return result;
   }
 
   function renderOverlay() {
@@ -91,14 +324,23 @@
       `FB Post Extractor\n` +
       `running=${state.running} done=${state.done}\n` +
       `collected=${state.posts.length}/${state.maxPosts} scrolls=${state.attemptedScrolls}/${state.maxScrolls}\n` +
-      `skippedLowQuality=${state.skippedLowQuality}\n\n` +
+      `skippedLowQuality=${state.skippedLowQuality}\n` +
+      `menuInspections=${state.menuInspectionsSucceeded}/${state.menuInspectionsAttempted} failed=${state.menuInspectionsFailed}\n\n` +
       `${state.lastMessage}`;
   }
 
   function getArticles() {
     return Array.from(document.querySelectorAll('[role="article"]'))
       .filter(isVisible)
-      .filter(isArticleReady);
+      .filter(isArticleReady)
+      .filter((article) => {
+        const postLinks = getPostLinks(article);
+        const commentLinks = getCommentLinks(article);
+
+        if (postLinks.length === 0) return false;
+        if (commentLinks.length > 0 && postLinks.length === 0) return false;
+        return true;
+      });
   }
 
   function pickPermalink(article) {
@@ -132,6 +374,7 @@
       const low = normLower(text);
 
       if (!href.includes("facebook.com")) continue;
+      if (href.includes("comment_id=") || href.includes("/comment/")) continue;
       if (!text || text.length < 2 || text.length > 80) continue;
       if (looksLikePostUrl(href)) continue;
       if (["like", "j'aime", "comment", "commenter", "share", "partager", "see more", "voir plus"].some((token) => low.includes(token))) continue;
@@ -251,6 +494,8 @@
   function isLowQuality(post) {
     let score = 0;
 
+    if (!post.permalink) return true;
+
     if (post.permalink) score += 2;
     if (post.authorName && post.authorName !== "unknown") score += 1;
     if (post.timestampIso || post.timestampLabel) score += 1;
@@ -260,13 +505,21 @@
     return score < 3;
   }
 
-  function extractArticle(article) {
+  async function extractArticle(article) {
     const permalink = pickPermalink(article);
     const author = getAuthor(article);
     const timestamp = getTimestamp(article);
     const audience = inferAudience(article);
     const message = getBodyText(article);
     const engagement = getEngagement(article);
+    const audienceDialogInspection = await inspectAudienceDialog(article);
+
+    state.menuInspectionsAttempted += 1;
+    if (audienceDialogInspection.audienceDialogFound) {
+      state.menuInspectionsSucceeded += 1;
+    } else {
+      state.menuInspectionsFailed += 1;
+    }
 
     const post = {
       postKey: "",
@@ -280,6 +533,7 @@
       reactionsCount: engagement.reactions,
       commentsCount: engagement.comments,
       sharesCount: engagement.shares,
+      audienceDialogInspection,
       extractedAt: new Date().toISOString()
     };
 
@@ -294,18 +548,28 @@
     state.seenKeys = new Set();
     state.attemptedScrolls = 0;
     state.skippedLowQuality = 0;
+    state.stagnantScrolls = 0;
+    state.menuInspectionsAttempted = 0;
+    state.menuInspectionsSucceeded = 0;
+    state.menuInspectionsFailed = 0;
 
     renderOverlay();
     log("Starting extraction...");
 
     while (state.posts.length < state.maxPosts && state.attemptedScrolls < state.maxScrolls) {
+      const postCountBeforeScan = state.posts.length;
       const articles = getArticles();
 
       for (const article of articles) {
         if (state.posts.length >= state.maxPosts) break;
 
-        const post = extractArticle(article);
+        const post = await extractArticle(article);
         if (!post.postKey) {
+          state.skippedLowQuality += 1;
+          continue;
+        }
+
+        if (!post.permalink) {
           state.skippedLowQuality += 1;
           continue;
         }
@@ -324,7 +588,21 @@
         log(`Collected ${state.posts.length}/${state.maxPosts} (skipped ${state.skippedLowQuality})`);
       }
 
+      if (state.posts.length > postCountBeforeScan) {
+        state.stagnantScrolls = 0;
+      } else {
+        state.stagnantScrolls += 1;
+        log(
+          `No new post found on this pass (${state.stagnantScrolls}/${state.maxStagnantScrolls}).`
+        );
+      }
+
       if (state.posts.length >= state.maxPosts) {
+        break;
+      }
+
+      if (state.stagnantScrolls >= state.maxStagnantScrolls) {
+        log("Stopping early to avoid loop: no new posts detected for too many scrolls.");
         break;
       }
 
@@ -376,6 +654,11 @@
       maxScrolls: state.maxScrolls,
       count: state.posts.length,
       skippedLowQuality: state.skippedLowQuality,
+      stagnantScrolls: state.stagnantScrolls,
+      maxStagnantScrolls: state.maxStagnantScrolls,
+      menuInspectionsAttempted: state.menuInspectionsAttempted,
+      menuInspectionsSucceeded: state.menuInspectionsSucceeded,
+      menuInspectionsFailed: state.menuInspectionsFailed,
       lastMessage: state.lastMessage
     };
   }

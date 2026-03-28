@@ -1,3 +1,10 @@
+<!--
+Document : README.md
+Auteur : Bruno DELNOZ
+Email : bruno.delnoz@protonmail.com
+Version : v1.4.0
+Date : 2026-03-28 09:45
+-->
 # Brave FB OnlyMe Extension
 
 ## But de l’extension
@@ -27,3 +34,14 @@ Chargement:
 2. Mode développeur
 3. Charger l’extension non empaquetée
 4. Sélectionner le dossier `fb-post-extractor-50`
+
+## Qualité de ciblage (v1.3.0)
+
+- L’extension principale renforce le ciblage des publications réelles en exigeant la présence d’un lien permalink de post.
+- Les conteneurs orientés commentaires/réponses sont explicitement exclus pour éviter de modifier la mauvaise cible.
+
+## Extracteur d’audience assisté (v1.4.0)
+
+- L’extracteur ouvre désormais le menu `...` de chaque post détecté.
+- Il entre dans **Change/Edit audience** et collecte les champs DOM réellement présents (roles, labels, états sélectionnés).
+- Ces informations sont exportées dans le JSON pour faciliter l’implémentation fiable du script principal de bascule vers **Only Me**.

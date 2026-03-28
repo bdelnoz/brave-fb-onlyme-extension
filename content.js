@@ -2,6 +2,22 @@
   if (window.__FB_ONLYME_EXTENSION_LOADED__) return;
   window.__FB_ONLYME_EXTENSION_LOADED__ = true;
 
+  /*
+   * File: /workspace/brave-fb-onlyme-extension/content.js
+   * Author: Bruno DELNOZ
+   * Email: bruno.delnoz@protonmail.com
+   * Purpose: Bulk update Facebook post audience to "Only Me" using safer post-level targeting.
+   * Version: v1.3.0
+   * Date: 2026-03-28 00:00 UTC
+   * Changelog:
+   * - v1.0.0 (2026-03-28 00:00 UTC): Initial automation flow.
+   * - v1.1.0 (2026-03-28 00:00 UTC): Robust menu/dialog handling and retries.
+   * - v1.2.0 (2026-03-28 00:00 UTC): Improved readiness checks and processing guards.
+   * - v1.3.0 (2026-03-28 00:00 UTC): Enforce post-permalink detection to avoid comment/reply containers.
+   */
+
+  const POST_URL_HINTS = ["/posts/", "story_fbid=", "/permalink/", "/photo/", "/videos/", "/reel/"];
+
   const state = {
     running: false,
     stopRequested: false,
@@ -70,6 +86,20 @@
     return true;
   }
 
+  function isCommentLink(href) {
+    return href.includes("comment_id=") || href.includes("/comment/");
+  }
+
+  function isPostPermalink(href) {
+    if (!href || !href.includes("facebook.com")) return false;
+    if (isCommentLink(href)) return false;
+    return POST_URL_HINTS.some((hint) => href.includes(hint));
+  }
+
+  function hasPostPermalink(article) {
+    return Array.from(article.querySelectorAll('a[href]')).some((a) => isPostPermalink(a.href || ""));
+  }
+
   // An article is "ready" when it has actual loaded content:
   // - has interactive buttons, OR
   // - has links (post timestamp/permalink), OR
@@ -84,17 +114,20 @@
     const hasButtons = article.querySelector('[role="button"], button') !== null;
     const hasLinks   = article.querySelector('a[href]') !== null;
     const hasText    = norm(article.innerText || "").length > 10;
+    const hasPostLink = hasPostPermalink(article);
 
-    return hasButtons || hasLinks || hasText;
+    return hasPostLink || (hasButtons && hasLinks && hasText);
   }
 
-  // Exclude comment/reply threads — don't require a specific post URL pattern
+  // Exclude comment/reply threads and require at least one post permalink.
   function isRealPost(article) {
     const links = Array.from(article.querySelectorAll('a[href]'));
+    let hasPostLink = false;
     for (const a of links) {
       const href = a.href || "";
       // If any link in the article is a comment anchor, it's a comment thread
-      if (href.includes("comment_id=") || href.includes("/comment/")) return false;
+      if (isCommentLink(href)) return false;
+      if (isPostPermalink(href)) hasPostLink = true;
     }
     // Also reject articles that are clearly nested inside another article (reply threads)
     let parent = article.parentElement;
@@ -102,7 +135,7 @@
       if (parent !== article && parent.getAttribute("role") === "article") return false;
       parent = parent.parentElement;
     }
-    return true;
+    return hasPostLink;
   }
 
   // Find the closest post-level container wrapping a given element
@@ -116,10 +149,7 @@
       if (r.width > 300 && r.height > 80) {
         // Check it has a timestamp link (strong signal it's a post)
         const hasTimestamp = Array.from(node.querySelectorAll('a[href]')).some(a => {
-          const href = a.href || "";
-          return href.includes("/posts/") || href.includes("story_fbid=") ||
-                 href.includes("/permalink/") || href.includes("/photo/") ||
-                 href.includes("/videos/");
+          return isPostPermalink(a.href || "");
         });
         if (hasTimestamp) return node;
       }
@@ -190,12 +220,7 @@
     const links = Array.from(article.querySelectorAll('a[href]'));
     for (const a of links) {
       const href = a.href || "";
-      if (
-        href.includes("/posts/") ||
-        href.includes("story_fbid=") ||
-        href.includes("/permalink/") ||
-        href.includes("/photo/")
-      ) return href;
+      if (isPostPermalink(href)) return href;
     }
     return norm(article.innerText || "").slice(0, 220) || ("post-" + Math.random().toString(36).slice(2));
   }
