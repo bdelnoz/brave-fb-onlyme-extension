@@ -88,10 +88,30 @@
     return hasButtons || hasLinks || hasText;
   }
 
+  // Returns true if this article is a real post (not a comment/reply thread)
+  function isRealPost(article) {
+    const links = Array.from(article.querySelectorAll('a[href]'));
+    let hasPostLink = false;
+    for (const a of links) {
+      const href = a.href || "";
+      // Reject comment threads
+      if (href.includes("comment_id=") || href.includes("/comment/")) return false;
+      if (
+        href.includes("/posts/") ||
+        href.includes("story_fbid=") ||
+        href.includes("/permalink/") ||
+        href.includes("/photo/") ||
+        href.includes("/videos/")
+      ) hasPostLink = true;
+    }
+    return hasPostLink;
+  }
+
   function getArticles() {
     return Array.from(document.querySelectorAll('[role="article"]'))
       .filter(isVisible)
-      .filter(isArticleReady);
+      .filter(isArticleReady)
+      .filter(isRealPost);
   }
 
   // Scroll to article and wait up to `maxMs` for it to finish loading
@@ -310,12 +330,25 @@ ${state.lastMessage || ""}`;
     return true;
   }
 
-  // FIX: search INSIDE the open menu/dialog first, not near the article
+  // FIX: search INSIDE the open menu/dialog only — no global fallback that could grab wrong post
   async function clickEditAudience(article) {
     const openBlocks = getOpenMenuOrDialog();
 
-    // Search in open menus first
     for (const block of openBlocks) {
+      // Sanity check: if the menu only has comment actions, it's the wrong menu
+      const blockText = norm(block.innerText || "");
+      if (
+        (blockText.includes("delete") || blockText.includes("hide")) &&
+        blockText.includes("report comment") &&
+        !blockText.includes("edit audience") &&
+        !blockText.includes("edit privacy")
+      ) {
+        log("menu is a comment menu, not a post menu — dismissing");
+        await dismissStrayUI();
+        state.failedEditAudience++;
+        return false;
+      }
+
       const candidates = Array.from(block.querySelectorAll(
         '[role="button"], button, [role="menuitem"], li, div[tabindex], span[role="button"]'
       ))
@@ -327,76 +360,35 @@ ${state.lastMessage || ""}`;
           return (
             combo.includes("edit audience") ||
             combo.includes("edit privacy") ||
-            combo.includes("audience") ||
-            // French/localized variants
             combo.includes("modifier l'audience") ||
             combo.includes("confidentialité") ||
-            combo.includes("privacy")
+            // generic "audience" only if no comment-related text
+            (combo.includes("audience") && !blockText.includes("report comment"))
           ) && !combo.includes("privacy · terms") && !combo.includes("advertising");
         });
 
       if (candidates.length > 0) {
-        // Prefer "edit audience" / "edit privacy" over generic "privacy"
         candidates.sort((a, b) => {
           const aText = norm(a.innerText || a.textContent || "") + norm(a.getAttribute("aria-label") || "");
           const bText = norm(b.innerText || b.textContent || "") + norm(b.getAttribute("aria-label") || "");
           const score = t =>
             (t.includes("edit audience") ? 4 : 0) +
             (t.includes("edit privacy")  ? 3 : 0) +
-            (t.includes("audience")      ? 2 : 0) +
-            (t.includes("privacy")       ? 1 : 0);
+            (t.includes("audience")      ? 2 : 0);
           return score(bText) - score(aText);
         });
 
-        log("click edit audience (in open menu)", describeEl(candidates[0]));
+        log("click edit audience (in menu)", describeEl(candidates[0]));
         realClick(candidates[0]);
         await sleep(jitter(1400));
         return true;
       }
     }
 
-    // Fallback: search globally near the article (original logic, kept as safety net)
-    const articleRect = article.getBoundingClientRect();
-    const globalCandidates = Array.from(document.querySelectorAll(
-      '[role="button"], button, span[role="button"], div[role="button"], [role="menuitem"]'
-    ))
-      .filter(isVisible)
-      .filter(isInViewport)
-      .map(el => {
-        const r = el.getBoundingClientRect();
-        const txt  = norm(el.innerText || el.textContent || "");
-        const aria = norm(el.getAttribute("aria-label") || "");
-        const combo = `${txt} ${aria}`;
-        let score = 0;
-
-        if (combo.includes("edit audience"))       score += 30000;
-        if (combo.includes("edit privacy"))        score += 28000;
-        if (combo.includes("audience"))            score += 8000;
-        if (combo.includes("privacy"))             score += 6000;
-
-        const dx = Math.abs(r.left - articleRect.left) + Math.abs(r.top - articleRect.top);
-        score -= dx;
-
-        if (/privacy · terms|advertising|cookies|footer/.test(combo)) score -= 50000;
-
-        return { el, score };
-      })
-      .filter(x => x.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    log("edit audience global fallback candidates =", globalCandidates.length);
-    globalCandidates.slice(0, 5).forEach((x, i) => log(`edit#${i+1} score=${Math.round(x.score)} ${describeEl(x.el)}`));
-
-    if (!globalCandidates[0]?.el) {
-      state.failedEditAudience++;
-      log("edit audience introuvable partout");
-      return false;
-    }
-
-    log("click edit audience (global fallback)", describeEl(globalCandidates[0].el));
-    realClick(globalCandidates[0].el);
-    await sleep(jitter(1400));
-    return true;
+    // Nothing found in any open menu — fail cleanly, do NOT search globally
+    state.failedEditAudience++;
+    log("edit audience introuvable dans le menu ouvert");
+    return false;
   }
 
   // FIX: much more permissive dialog detection
