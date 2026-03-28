@@ -2,6 +2,19 @@
   if (window.__FB_POST_EXTRACTOR_LOADED__) return;
   window.__FB_POST_EXTRACTOR_LOADED__ = true;
 
+  /*
+   * File: /workspace/brave-fb-onlyme-extension/fb-post-extractor-50/content.js
+   * Author: Bruno DELNOZ
+   * Email: bruno.delnoz@protonmail.com
+   * Purpose: Extract structured data from Facebook posts without looping indefinitely.
+   * Version: v1.2.0
+   * Date: 2026-03-28 00:00 UTC
+   * Changelog:
+   * - v1.0.0 (2026-03-28 00:00 UTC): Initial extractor logic.
+   * - v1.1.0 (2026-03-28 00:00 UTC): Stop extraction early when no new posts are collected across consecutive scrolls.
+   * - v1.2.0 (2026-03-28 00:00 UTC): Reject comment-level entries by requiring a post permalink and filtering comment URLs in author detection.
+   */
+
   const state = {
     running: false,
     done: false,
@@ -12,7 +25,9 @@
     lastMessage: "",
     posts: [],
     seenKeys: new Set(),
-    skippedLowQuality: 0
+    skippedLowQuality: 0,
+    stagnantScrolls: 0,
+    maxStagnantScrolls: 12
   };
 
   const POST_URL_HINTS = ["/posts/", "story_fbid=", "/permalink/", "/photo/", "/videos/"];
@@ -47,6 +62,14 @@
       if (!href.includes("facebook.com")) return false;
       if (href.includes("comment_id=") || href.includes("/comment/")) return false;
       return looksLikePostUrl(href);
+    });
+  }
+
+  function getCommentLinks(article) {
+    const links = Array.from(article.querySelectorAll('a[href]')).filter(isVisible);
+    return links.filter((a) => {
+      const href = a.href || "";
+      return href.includes("comment_id=") || href.includes("/comment/");
     });
   }
 
@@ -98,7 +121,15 @@
   function getArticles() {
     return Array.from(document.querySelectorAll('[role="article"]'))
       .filter(isVisible)
-      .filter(isArticleReady);
+      .filter(isArticleReady)
+      .filter((article) => {
+        const postLinks = getPostLinks(article);
+        const commentLinks = getCommentLinks(article);
+
+        if (postLinks.length === 0) return false;
+        if (commentLinks.length > 0 && postLinks.length === 0) return false;
+        return true;
+      });
   }
 
   function pickPermalink(article) {
@@ -132,6 +163,7 @@
       const low = normLower(text);
 
       if (!href.includes("facebook.com")) continue;
+      if (href.includes("comment_id=") || href.includes("/comment/")) continue;
       if (!text || text.length < 2 || text.length > 80) continue;
       if (looksLikePostUrl(href)) continue;
       if (["like", "j'aime", "comment", "commenter", "share", "partager", "see more", "voir plus"].some((token) => low.includes(token))) continue;
@@ -251,6 +283,8 @@
   function isLowQuality(post) {
     let score = 0;
 
+    if (!post.permalink) return true;
+
     if (post.permalink) score += 2;
     if (post.authorName && post.authorName !== "unknown") score += 1;
     if (post.timestampIso || post.timestampLabel) score += 1;
@@ -294,11 +328,13 @@
     state.seenKeys = new Set();
     state.attemptedScrolls = 0;
     state.skippedLowQuality = 0;
+    state.stagnantScrolls = 0;
 
     renderOverlay();
     log("Starting extraction...");
 
     while (state.posts.length < state.maxPosts && state.attemptedScrolls < state.maxScrolls) {
+      const postCountBeforeScan = state.posts.length;
       const articles = getArticles();
 
       for (const article of articles) {
@@ -306,6 +342,11 @@
 
         const post = extractArticle(article);
         if (!post.postKey) {
+          state.skippedLowQuality += 1;
+          continue;
+        }
+
+        if (!post.permalink) {
           state.skippedLowQuality += 1;
           continue;
         }
@@ -324,7 +365,21 @@
         log(`Collected ${state.posts.length}/${state.maxPosts} (skipped ${state.skippedLowQuality})`);
       }
 
+      if (state.posts.length > postCountBeforeScan) {
+        state.stagnantScrolls = 0;
+      } else {
+        state.stagnantScrolls += 1;
+        log(
+          `No new post found on this pass (${state.stagnantScrolls}/${state.maxStagnantScrolls}).`
+        );
+      }
+
       if (state.posts.length >= state.maxPosts) {
+        break;
+      }
+
+      if (state.stagnantScrolls >= state.maxStagnantScrolls) {
+        log("Stopping early to avoid loop: no new posts detected for too many scrolls.");
         break;
       }
 
@@ -376,6 +431,8 @@
       maxScrolls: state.maxScrolls,
       count: state.posts.length,
       skippedLowQuality: state.skippedLowQuality,
+      stagnantScrolls: state.stagnantScrolls,
+      maxStagnantScrolls: state.maxStagnantScrolls,
       lastMessage: state.lastMessage
     };
   }
