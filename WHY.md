@@ -2,8 +2,8 @@
 Document : WHY.md
 Auteur : Bruno DELNOZ
 Email : bruno.delnoz@protonmail.com
-Version : v1.3.0
-Date : 2026-03-28 00:00
+Version : v1.4.0
+Date : 2026-03-28 10:45
 -->
 # Why this project exists
 
@@ -15,3 +15,5 @@ Facebook pages can render comment/reply containers that look similar to post car
 If those containers are processed, automation can click irrelevant menus and fail to update the intended post privacy.
 
 Version `v1.3.0` requires real post permalink signals and excludes comment-style links, so the audience update flow better targets true post entries.
+
+Version `v1.4.0` also hardens the audience replacement phase to target the privacy selector itself and avoid accidental matches in unrelated Facebook dialogs.
