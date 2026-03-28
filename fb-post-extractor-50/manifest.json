@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Post Extractor (50)",
+  "version": "1.0.0",
+  "description": "Extracts structured data from up to 50 Facebook posts for analysis/adaptation workflows.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://m.facebook.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
