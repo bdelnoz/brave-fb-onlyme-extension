@@ -20,6 +20,17 @@ function renderState(state) {
   );
 }
 
+function getExtractedJson(callback) {
+  chrome.runtime.sendMessage({ type: "GET_EXTRACTED_JSON" }, (response) => {
+    if (!response?.ok) {
+      callback(new Error(response?.error || "unknown"));
+      return;
+    }
+
+    callback(null, response);
+  });
+}
+
 document.getElementById("startBtn").addEventListener("click", () => {
   const maxPosts = Number(document.getElementById("maxPosts").value || 50);
   const scrollDelayMs = Number(document.getElementById("scrollDelayMs").value || 1600);
@@ -60,23 +71,49 @@ document.getElementById("statusBtn").addEventListener("click", () => {
 });
 
 document.getElementById("copyBtn").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "COPY_EXTRACTED_JSON" }, (response) => {
-    if (!response?.ok) {
-      setStatus(`Copy error:\n${response?.error || "unknown"}`);
+  getExtractedJson(async (err, response) => {
+    if (err) {
+      setStatus(`Copy error:\n${err.message}`);
       return;
     }
 
-    setStatus(`Copied ${response.count} posts to clipboard.`);
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(response.payload, null, 2));
+      setStatus(`Copied ${response.count} posts to clipboard.`);
+    } catch (e) {
+      setStatus(`Copy error:\n${String(e)}`);
+    }
   });
 });
 
 document.getElementById("downloadBtn").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "DOWNLOAD_EXTRACTED_JSON" }, (response) => {
-    if (!response?.ok) {
-      setStatus(`Download error:\n${response?.error || "unknown"}`);
+  getExtractedJson((err, response) => {
+    if (err) {
+      setStatus(`Download error:\n${err.message}`);
       return;
     }
 
-    setStatus(`Downloaded JSON with ${response.count} posts.`);
+    try {
+      const json = JSON.stringify(response.payload, null, 2);
+      const url = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+
+      chrome.downloads.download(
+        {
+          url,
+          filename: response.filename,
+          saveAs: true
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            setStatus(`Download error:\n${chrome.runtime.lastError.message}`);
+            return;
+          }
+
+          setStatus(`Downloaded JSON with ${response.count} posts.`);
+        }
+      );
+    } catch (e) {
+      setStatus(`Download error:\n${String(e)}`);
+    }
   });
 });
