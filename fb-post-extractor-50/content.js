@@ -11,8 +11,11 @@
     maxScrolls: 180,
     lastMessage: "",
     posts: [],
-    seenKeys: new Set()
+    seenKeys: new Set(),
+    skippedLowQuality: 0
   };
+
+  const POST_URL_HINTS = ["/posts/", "story_fbid=", "/permalink/", "/photo/", "/videos/"];
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,6 +34,29 @@
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
+  }
+
+  function looksLikePostUrl(href) {
+    return POST_URL_HINTS.some((hint) => href.includes(hint));
+  }
+
+  function getPostLinks(article) {
+    const links = Array.from(article.querySelectorAll('a[href]')).filter(isVisible);
+    return links.filter((a) => {
+      const href = a.href || "";
+      if (!href.includes("facebook.com")) return false;
+      if (href.includes("comment_id=") || href.includes("/comment/")) return false;
+      return looksLikePostUrl(href);
+    });
+  }
+
+  function isArticleReady(article) {
+    const loading = article.querySelector('[role="status"], [data-visualcompletion="loading-state"]');
+    if (loading && isVisible(loading)) return false;
+
+    const hasText = norm(article.innerText || "").length > 30;
+    const hasPostLink = getPostLinks(article).length > 0;
+    return hasText || hasPostLink;
   }
 
   function log(message) {
@@ -53,7 +79,7 @@
         "color:#7dffb3",
         "border:1px solid #7dffb3",
         "padding:10px",
-        "max-width:420px",
+        "max-width:460px",
         "font:12px monospace",
         "white-space:pre-wrap",
         "pointer-events:none"
@@ -64,40 +90,21 @@
     box.textContent =
       `FB Post Extractor\n` +
       `running=${state.running} done=${state.done}\n` +
-      `collected=${state.posts.length}/${state.maxPosts} scrolls=${state.attemptedScrolls}/${state.maxScrolls}\n\n` +
+      `collected=${state.posts.length}/${state.maxPosts} scrolls=${state.attemptedScrolls}/${state.maxScrolls}\n` +
+      `skippedLowQuality=${state.skippedLowQuality}\n\n` +
       `${state.lastMessage}`;
   }
 
   function getArticles() {
-    return Array.from(document.querySelectorAll('[role="article"]')).filter(isVisible);
+    return Array.from(document.querySelectorAll('[role="article"]'))
+      .filter(isVisible)
+      .filter(isArticleReady);
   }
 
   function pickPermalink(article) {
-    const links = Array.from(article.querySelectorAll('a[href]'));
-
-    for (const a of links) {
-      const href = a.href || "";
-      if (
-        href.includes("/posts/") ||
-        href.includes("story_fbid=") ||
-        href.includes("/permalink/") ||
-        href.includes("/photo/") ||
-        href.includes("/videos/")
-      ) {
-        return href;
-      }
-    }
-
-    return "";
-  }
-
-  function inferPostKey(article, permalink) {
-    if (permalink) return permalink;
-
-    const txt = norm(article.innerText || "").slice(0, 240);
-    if (txt) return txt;
-
-    return `post-${Math.random().toString(36).slice(2)}`;
+    const links = getPostLinks(article);
+    if (links.length === 0) return "";
+    return links[0].href || "";
   }
 
   function inferAudience(article) {
@@ -109,8 +116,7 @@
 
       if (value.includes("only me") || value.includes("moi uniquement")) return "only_me";
       if (value.includes("public")) return "public";
-      if (value.includes("friends")) return "friends";
-      if (value.includes("amis")) return "friends";
+      if (value.includes("friends") || value.includes("amis")) return "friends";
       if (value.includes("custom")) return "custom";
     }
 
@@ -123,15 +129,23 @@
     for (const a of links) {
       const href = a.href || "";
       const text = norm(a.innerText || a.textContent || "");
-      if (!text) continue;
+      const low = normLower(text);
 
-      if (href.includes("/user/") || /^https:\/\/www\.facebook\.com\/[A-Za-z0-9._-]+\/?$/i.test(href)) {
-        return { name: text, profileUrl: href };
-      }
+      if (!href.includes("facebook.com")) continue;
+      if (!text || text.length < 2 || text.length > 80) continue;
+      if (looksLikePostUrl(href)) continue;
+      if (["like", "j'aime", "comment", "commenter", "share", "partager", "see more", "voir plus"].some((token) => low.includes(token))) continue;
+      if (/^(\d+\s*[smhdwy]|\d+\s*min|\d+\s*h|today|yesterday)$/i.test(text)) continue;
+
+      return { name: text, profileUrl: href };
     }
 
-    const fallback = norm(article.querySelector('h2, h3, strong')?.textContent || "");
-    return { name: fallback || "unknown", profileUrl: "" };
+    const fallback = norm(article.querySelector('h2, h3, h4, strong')?.textContent || "");
+    if (fallback && fallback.length <= 80) {
+      return { name: fallback, profileUrl: "" };
+    }
+
+    return { name: "unknown", profileUrl: "" };
   }
 
   function getTimestamp(article) {
@@ -143,10 +157,10 @@
       };
     }
 
-    const links = Array.from(article.querySelectorAll('a[href]'));
+    const links = Array.from(article.querySelectorAll('a[href]')).filter(isVisible);
     for (const a of links) {
       const txt = norm(a.innerText || a.textContent || "");
-      if (/^(\d+\s*[smhdwy]|\d+\s*min|\d+\s*h|yesterday|today)$/i.test(txt)) {
+      if (/^(\d+\s*[smhdwy]|\d+\s*min|\d+\s*h|today|yesterday|now)$/i.test(txt)) {
         return { iso: "", label: txt };
       }
     }
@@ -155,14 +169,36 @@
   }
 
   function getBodyText(article) {
-    const textBlocks = Array.from(article.querySelectorAll('[data-ad-comet-preview="message"], div[dir="auto"], span[dir="auto"]'));
-    const merged = textBlocks
-      .map((el) => norm(el.textContent || ""))
-      .filter((value) => value.length > 0)
-      .join("\n");
+    const ignoreTokens = [
+      "like",
+      "comment",
+      "share",
+      "j'aime",
+      "commenter",
+      "partager",
+      "see translation",
+      "voir la traduction"
+    ];
 
-    if (merged.length > 0) return merged.slice(0, 5000);
-    return norm(article.innerText || "").slice(0, 5000);
+    const textBlocks = Array.from(
+      article.querySelectorAll('[data-ad-comet-preview="message"], [data-ad-preview="message"], div[dir="auto"], span[dir="auto"]')
+    );
+
+    const cleanBlocks = textBlocks
+      .map((el) => norm(el.textContent || ""))
+      .filter((value) => value.length >= 8)
+      .filter((value) => {
+        const low = normLower(value);
+        return !ignoreTokens.some((token) => low === token);
+      })
+      .sort((a, b) => b.length - a.length);
+
+    if (cleanBlocks.length > 0) {
+      return cleanBlocks[0].slice(0, 5000);
+    }
+
+    const fallback = norm(article.innerText || "");
+    return fallback.slice(0, 5000);
   }
 
   function extractNumberFromText(text) {
@@ -179,9 +215,9 @@
     let comments = null;
     let shares = null;
 
-    const buttons = Array.from(article.querySelectorAll('[role="button"], a, span')).filter(isVisible);
+    const nodes = Array.from(article.querySelectorAll('[role="button"], a, span')).filter(isVisible);
 
-    for (const el of buttons) {
+    for (const el of nodes) {
       const txt = normLower(el.innerText || el.textContent || "");
       if (!txt) continue;
 
@@ -193,29 +229,47 @@
         shares = extractNumberFromText(txt);
       }
 
-      if (reactions === null && (txt.includes("like") || txt.includes("j'aime") || txt.includes("reaction"))) {
+      if (reactions === null && (txt.includes("reaction") || txt.includes("like") || txt.includes("j'aime"))) {
         reactions = extractNumberFromText(txt);
       }
     }
 
-    return {
-      reactions,
-      comments,
-      shares
-    };
+    return { reactions, comments, shares };
+  }
+
+  function inferPostKey(post) {
+    if (post.permalink) return post.permalink;
+
+    const key = [post.authorName, post.timestampLabel, post.message.slice(0, 80)]
+      .map((part) => norm(part || ""))
+      .filter(Boolean)
+      .join("|");
+
+    return key || "";
+  }
+
+  function isLowQuality(post) {
+    let score = 0;
+
+    if (post.permalink) score += 2;
+    if (post.authorName && post.authorName !== "unknown") score += 1;
+    if (post.timestampIso || post.timestampLabel) score += 1;
+    if (post.audience !== "unknown") score += 1;
+    if (post.message && post.message.length >= 12) score += 1;
+
+    return score < 3;
   }
 
   function extractArticle(article) {
     const permalink = pickPermalink(article);
-    const postKey = inferPostKey(article, permalink);
     const author = getAuthor(article);
     const timestamp = getTimestamp(article);
     const audience = inferAudience(article);
     const message = getBodyText(article);
     const engagement = getEngagement(article);
 
-    return {
-      postKey,
+    const post = {
+      postKey: "",
       permalink,
       authorName: author.name,
       authorProfileUrl: author.profileUrl,
@@ -228,6 +282,9 @@
       sharesCount: engagement.shares,
       extractedAt: new Date().toISOString()
     };
+
+    post.postKey = inferPostKey(post);
+    return post;
   }
 
   async function collectPosts() {
@@ -236,6 +293,7 @@
     state.posts = [];
     state.seenKeys = new Set();
     state.attemptedScrolls = 0;
+    state.skippedLowQuality = 0;
 
     renderOverlay();
     log("Starting extraction...");
@@ -247,13 +305,23 @@
         if (state.posts.length >= state.maxPosts) break;
 
         const post = extractArticle(article);
-        if (!post.postKey || state.seenKeys.has(post.postKey)) {
+        if (!post.postKey) {
+          state.skippedLowQuality += 1;
+          continue;
+        }
+
+        if (state.seenKeys.has(post.postKey)) {
+          continue;
+        }
+
+        if (isLowQuality(post)) {
+          state.skippedLowQuality += 1;
           continue;
         }
 
         state.seenKeys.add(post.postKey);
         state.posts.push(post);
-        log(`Collected ${state.posts.length}/${state.maxPosts}`);
+        log(`Collected ${state.posts.length}/${state.maxPosts} (skipped ${state.skippedLowQuality})`);
       }
 
       if (state.posts.length >= state.maxPosts) {
@@ -261,13 +329,13 @@
       }
 
       state.attemptedScrolls += 1;
-      window.scrollBy({ top: Math.round(window.innerHeight * 0.9), behavior: "smooth" });
+      window.scrollBy({ top: Math.round(window.innerHeight * 0.95), behavior: "smooth" });
       await sleep(state.scrollDelayMs);
     }
 
     state.running = false;
     state.done = true;
-    log(`Extraction finished: ${state.posts.length} posts collected.`);
+    log(`Extraction finished: ${state.posts.length} posts collected, ${state.skippedLowQuality} low-quality skipped.`);
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -307,6 +375,7 @@
       scrollDelayMs: state.scrollDelayMs,
       maxScrolls: state.maxScrolls,
       count: state.posts.length,
+      skippedLowQuality: state.skippedLowQuality,
       lastMessage: state.lastMessage
     };
   }

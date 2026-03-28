@@ -16,6 +16,7 @@ function renderState(state) {
     `count=${state.count}/${state.maxPosts}\n` +
     `attemptedScrolls=${state.attemptedScrolls}/${state.maxScrolls}\n` +
     `scrollDelayMs=${state.scrollDelayMs}\n` +
+    `skippedLowQuality=${state.skippedLowQuality || 0}\n` +
     `lastMessage=${state.lastMessage || ""}`
   );
 }
